@@ -1,0 +1,172 @@
+Option Explicit
+
+Sub Macro09ver2_ReadDataSheet_and_ExportCSVforR()
+
+    ' Macro_ReadDataSheet&ExportCSVforR
+    ' Read CSV File: B4"&.csv"...B6"&.csv" in the PWD
+    '１日分を横１列に書き出す
+
+    '表紙の入力をもとに開始年と終了年をセット
+    Application.ScreenUpdating = False
+    Dim StartYear As Integer
+    Dim EndYear As Integer
+    Dim Swap As Integer
+    Dim Span As Integer
+    Dim InputKey As Integer
+    Worksheets("表紙").Activate
+    StartYear = Range("B4").Value
+    EndYear = Range("B6").Value
+    If StartYear > EndYear Then
+        Swap = StartYear
+        StartYear = EndYear
+        EndYear = Swap
+    End If
+
+    '閏年判定付きの配列に対象年を収容
+    Span = EndYear - StartYear
+    Dim YearFlag() As Integer
+    ReDim YearFlag(Span, 1)
+    Dim yy As Integer
+    For yy = 0 To Span
+        YearFlag(yy, 0) = StartYear + yy
+        If YearFlag(yy, 0) Mod 4 = 0 Then YearFlag(yy, 1) = 1 Else YearFlag(yy, 1) = 0
+        If YearFlag(yy, 0) Mod 100 = 0 Then YearFlag(yy, 1) = 0
+        If YearFlag(yy, 0) Mod 400 = 0 Then YearFlag(yy, 1) = 1
+    Next yy
+
+    'その年に対応するシートを追加し、CSVファイルを読み込む
+    '同名のシートがすでにある場合は上書き
+    '指定年のCSVが見つからない場合は終了
+    Dim SheetName As String
+    Dim NewSheet As Worksheet
+    Dim OldSheet As Worksheet
+    Dim TargetCSV As String
+    For yy = 0 To Span
+        For Each OldSheet In Worksheets
+            SheetName = Trim(Str(YearFlag(yy, 0)))
+            If OldSheet.Name = SheetName Then
+                InputKey = MsgBox("同じ名前「" & SheetName & "」のシートがあります" & vbCr & "上書きして構いませんか？", vbYesNo + vbQuestion)
+                If InputKey = vbYes Then
+                    Application.DisplayAlerts = False
+                    Worksheets(SheetName).Delete
+                    Application.DisplayAlerts = True
+                Else
+                    Application.StatusBar = False
+                    Application.ScreenUpdating = True
+                    Worksheets("表紙").Activate
+                    MsgBox "処理を中断しました"
+                    Exit Sub
+                End If
+            End If
+        Next OldSheet
+        TargetCSV = ThisWorkbook.Path & "\" & YearFlag(yy, 0) & ".csv"
+        If Dir(TargetCSV) = "" Then
+            MsgBox "読み込むファイルが見つかりません" & vbCr & "処理を中断します", vbOKOnly + vbCritical
+            Application.StatusBar = False
+            Application.ScreenUpdating = True
+            Worksheets("表紙").Activate
+            MsgBox "処理を中断しました"
+            Exit Sub
+        End If
+        Set NewSheet = Worksheets.Add()
+        NewSheet.Name = YearFlag(yy, 0)
+        Application.StatusBar = YearFlag(yy, 0) & "年のファイルを読み込み中です"
+        DoEvents
+        With NewSheet.QueryTables.Add(Connection:="TEXT;" & TargetCSV, Destination:=Range("$A$1"))
+            .TextFilePlatform = 932
+            .TextFileCommaDelimiter = True
+            .Refresh
+            .Delete
+        End With
+        ActiveSheet.Move after:=Worksheets(Worksheets.Count)
+    Next yy
+
+    '書き出す先のCSVをオープン
+    '同名の出力先CSVがすでにある場合は削除して再出力（見た目は上書き）
+    Dim ExportCSV As String
+    ExportCSV = ThisWorkbook.Path & "\" & "birthData_" & StartYear & "-" & EndYear & ".csv"
+    If Dir(ExportCSV) <> "" Then
+        InputKey = MsgBox("同じ名前の出力先ファイル「" & Mid(ExportCSV, InStrRev(ExportCSV, "\") + 1) & "」があります" & vbCr & "上書きして構いませんか？", vbYesNo + vbQuestion)
+        If InputKey = vbYes Then
+            Kill ExportCSV
+        Else
+            Application.StatusBar = False
+            Application.ScreenUpdating = True
+            Worksheets("表紙").Activate
+            MsgBox "処理を中断しました"
+            Exit Sub
+        End If
+    End If
+    Open ExportCSV For Output As #1
+    Dim Cluster(), OffsetRow(), OffsetCol()
+    Cluster = Array("TOTAL", "HOSPITAL", "CLINIC", "MIDWIFE", "HOME", "OTHER")
+    OffsetCol = Array(2, 2, 2, 2, 2, 2)
+    OffsetRow = Array(38, 467, 896, 1325, 1754, 2183)
+    Const MonthGap = 33
+
+    '列の名前を書き出す
+    Dim Header As String
+    Header = "YEAR,MONTH,DAY,CLUSTER,0-24HH,0-1H,1-2H,2-3H,3-4H,4-5H,5-6H,6-7H,7-8H,8-9H,9-10H,10-11H,11-12H,12-13H,13-14H,14-15H,15-16H,16-17H,17-18H,18-19H,19-20H,20-21H,21-22H,22-23H,23-24H"
+    Print #1, Header & vbCr;
+
+    'データを種別ごとに書き出す
+    Dim Birth As String
+    Dim mm As Integer, dd As Integer, hh As Integer, cc As Integer
+    Dim NRow As Integer, NCol As Integer
+    Dim MonthLength(1 To 12) As Integer
+        MonthLength(1) = 31
+        MonthLength(2) = 28
+        MonthLength(3) = 31
+        MonthLength(4) = 30
+        MonthLength(5) = 31
+        MonthLength(6) = 30
+        MonthLength(7) = 31
+        MonthLength(8) = 31
+        MonthLength(9) = 30
+        MonthLength(10) = 31
+        MonthLength(11) = 30
+        MonthLength(12) = 31
+
+    For yy = 0 To Span
+        SheetName = Trim(Str(YearFlag(yy, 0)))
+        With Worksheets(SheetName)
+        For cc = LBound(Cluster) To UBound(Cluster)
+            For mm = 1 To 12
+                'TRUEは１じゃなくてマイナス1。ワークシートと違う。BASICのLEGATHYなのか？
+                For dd = 1 To (MonthLength(mm) - (mm = 2) * YearFlag(yy, 1))
+                    NRow = OffsetRow(cc) + MonthGap * (mm - 1) + dd
+                    Print #1, YearFlag(yy, 0) & ",";
+                    Print #1, mm & ",";
+                    Print #1, dd & ",";
+                    Print #1, Cluster(cc) & ",";
+                    For hh = 0 To 24
+                    '0は0-24時の計、1は0-1時…24は23-24時
+                        NCol = OffsetCol(cc) + hh
+                        Birth = .Cells(NRow, NCol).Value
+                        '欠損値の処理
+                        If Birth = "-" Then Birth = "NA"
+                        Print #1, Birth & ",";
+                    Next hh
+                    Print #1, vbCr;
+                Next dd
+            Application.StatusBar = YearFlag(yy, 0) & "年" & mm & "月の" & Cluster(cc) & "データを処理中です"
+            DoEvents
+            Next mm
+        Next cc
+    End With
+    Next yy
+    '書き出したファイルを閉じる
+    Close #1
+
+    'クエリーテーブルを削除
+    'Dim qt As QueryTable
+    'For Each qt In ActiveSheet.QueryTables
+    'qt.Delete
+    'Next
+
+    '後処理
+    Application.StatusBar = False
+    Application.ScreenUpdating = True
+    Worksheets("表紙").Activate
+    MsgBox "処理が終了しました" & vbCr & "「" & Mid(ExportCSV, InStrRev(ExportCSV, "\") + 1) & "」に「Ｒ」用データを出力ずみです"
+End Sub
